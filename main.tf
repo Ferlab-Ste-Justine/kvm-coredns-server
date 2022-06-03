@@ -1,6 +1,6 @@
 locals {
   cloud_init_volume_name = var.cloud_init_volume_name == "" ? "${var.name}-cloud-init.iso" : var.cloud_init_volume_name
-  bind_addresses = length(var.macvtap_interfaces) == 0 ? [var.ip] : [for macvtap_interface in var.macvtap_interfaces: macvtap_interface.ip]
+  bind_addresses = length(var.macvtap_interfaces) == 0 ? [var.libvirt_network.ip] : [for macvtap_interface in var.macvtap_interfaces: macvtap_interface.ip]
   network_config = templatefile(
     "${path.module}/files/network_config.yaml.tpl", 
     {
@@ -8,10 +8,10 @@ locals {
     }
   )
   network_interfaces = length(var.macvtap_interfaces) == 0 ? [{
-    network_id = var.network_id
+    network_id = var.libvirt_network.network_id
     macvtap = null
-    addresses = [var.ip]
-    mac = var.mac != "" ? var.mac : null
+    addresses = [var.libvirt_network.ip]
+    mac = var.libvirt_network.mac != "" ? var.libvirt_network.mac : null
     hostname = var.name
   }] : [for macvtap_interface in var.macvtap_interfaces: {
     network_id = null
@@ -20,6 +20,13 @@ locals {
     mac = macvtap_interface.mac
     hostname = null
   }]
+  fluentd_conf = templatefile(
+    "${path.module}/files/fluentd.conf.tpl", 
+    {
+      fluentd = var.fluentd
+      fluentd_buffer_conf = var.fluentd.buffer.customized ? var.fluentd.buffer.custom_value : file("${path.module}/files/fluentd_buffer.conf")
+    }
+  )
 }
 
 data "template_cloudinit_config" "user_data" {
@@ -35,19 +42,24 @@ data "template_cloudinit_config" "user_data" {
           {
             hostname = var.name
             bind_addresses = local.bind_addresses
-            reload_interval = var.zonefiles_reload_interval
-            load_balance_records = var.load_balance_records
-            alternate_dns_servers = var.alternate_dns_servers
+            reload_interval = var.dns.zonefiles_reload_interval
+            load_balance_records = var.dns.load_balance_records
+            alternate_dns_servers = var.dns.alternate_dns_servers
           }
         )
-        etcd_ca_certificate = var.etcd_ca_certificate
-        etcd_client_certificate = var.etcd_client_certificate
-        etcd_client_key = var.etcd_client_key
-        etcd_endpoints = var.etcd_endpoints
-        etcd_key_prefix = var.etcd_key_prefix
+        etcd_ca_certificate = var.etcd.ca_certificate
+        etcd_client_certificate = var.etcd.client.certificate
+        etcd_client_key = var.etcd.client.key
+        etcd_client_username = var.etcd.client.username
+        etcd_client_password = var.etcd.client.password
+        etcd_endpoints = var.etcd.endpoints
+        etcd_key_prefix = var.etcd.key_prefix
         ssh_admin_user = var.ssh_admin_user
         admin_user_password = var.admin_user_password
         ssh_admin_public_key = var.ssh_admin_public_key
+        chrony = var.chrony
+        fluentd = var.fluentd
+        fluentd_conf = local.fluentd_conf
       }
     )
   }

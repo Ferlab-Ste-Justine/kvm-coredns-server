@@ -39,9 +39,10 @@ The module supports libvirt networks and macvtap (bridge mode).
 - **vcpus**: Number of vcpus to assign to the vm. Defaults to 2.
 - **memory**: Amount of memory in MiB to assign to the vm. Defaults to 8192 (ie, 8 GiB).
 - **volume_id**: Id of the image volume to attach to the vm. A recent version of ubuntu is recommended as this is what this module has been validated against.
-- **network_id**: Id (ie, uuid) of the libvirt network to connect the vm to if you wish to connect the vm to a libvirt network.
-- **ip**: Ip of the vm if you opt to connect it to a libvirt network. Note that this isn't an optional parameter. Dhcp cannot be used.
-- **mac**: Mac address of the vm if you opt to connect it to a libvirt network. If none is passed, a random one will be generated.
+- **libvirt_network**: Parameters to connect to a libvirt network if you opt for that instead of macvtap interfaces. In has the following keys:
+  - **ip**: Ip of the vm.
+  - **mac**: Mac address of the vm. If none is passed, a random one will be generated.
+  - **network_id**: Id (ie, uuid) of the libvirt network to connect to.
 - **macvtap_interfaces**: List of macvtap interfaces to connect the vm to if you opt for macvtap interfaces instead of a libvirt network. Each entry in the list is a map with the following keys:
   - **interface**: Host network interface that you plan to connect your macvtap interface with.
   - **prefix_length**: Length of the network prefix for the network the interface will be connected to. For a **192.168.1.0/24** for example, this would be 24.
@@ -54,14 +55,38 @@ The module supports libvirt networks and macvtap (bridge mode).
 - **ssh_admin_user**: Username of the default sudo user in the image. Defaults to **ubuntu**.
 - **admin_user_password**: Optional password for the default sudo user of the image. Note that this will not enable ssh password connections, but it will allow you to log into the vm from the host using the **virsh console** command.
 - **ssh_admin_public_key**: Public part of the ssh key the admin will be able to login as
-- **etcd_ca_certificate**: Tls ca certificate that will be used to validate the authenticity of the etcd cluster
-- **etcd_client_certificate**: Tls client certificate for the etcd user the server will authentify as
-- **etcd_client_key**: Tls client key for the etcd user the server will authentify as
-- **etcd_key_prefix**: Prefix for all the domain keys. The server will look for keys with this prefix and will remove this prefix from the key's name to get the domain.
-- **etcd_endpoints**: A list of endpoints for the etcd servers, each entry taking the ```<ip>:<port>``` format
-- **zonefiles_reload_interval**: Time interval at which the **auto** plugin should poll the zonefiles for updates. Defaults to **3s** (ie, 3 seconds).
-- **load_balance_records**: In the event that an A or AAAA record yields several ips, whether to randomize the returned order or not (with clients that only take the first ip, you can achieve some dns-level load balancing this way). Defaults to **true**.
-- **alternate_dns_servers**: List of dns servers to use to answer all queries that are not covered by the zonefiles. It defaults to an empty list.
+- **etcd**: Parameters to connect to the etcd backend. It has the following keys:
+  - **ca_certificate**: Tls ca certificate that will be used to validate the authenticity of the etcd cluster
+  - **etcd_key_prefix**: Prefix for all the domain keys. The server will look for keys with this prefix and will remove this prefix from the key's name to get the domain.
+  - **etcd_endpoints**: A list of endpoints for the etcd servers, each entry taking the ```<ip>:<port>``` format
+  - **client**: Authentication parameters for the client (either certificate or username/password authentication are support). It has the following keys:
+    - **certificate**: Client certificate if certificate authentication is used.
+    - **key**: Client key if certificate authentication is used.
+    - **username**: Client username if certificate authentication is used.
+    - **password**: Client password if certificate authentication is used.
+- **dns**: Parameters to customise the dns behavior. It has the following keys:
+  - **zonefiles_reload_interval**: Time interval at which the **auto** plugin should poll the zonefiles for updates. Defaults to **3s** (ie, 3 seconds).
+  - **load_balance_records**: In the event that an A or AAAA record yields several ips, whether to randomize the returned order or not (with clients that only take the first ip, you can achieve some dns-level load balancing this way). Defaults to **true**.
+  - **alternate_dns_servers**: List of dns servers to use to answer all queries that are not covered by the zonefiles. It defaults to an empty list.
+- **chrony**: Optional chrony configuration for when you need a more fine-grained ntp setup on your vm. It is an object with the following fields:
+  - **enabled**: If set the false (the default), chrony will not be installed and the vm ntp settings will be left to default.
+  - **servers**: List of ntp servers to sync from with each entry containing two properties, **url** and **options** (see: https://chrony.tuxfamily.org/doc/4.2/chrony.conf.html#server)
+  - **pools**: A list of ntp server pools to sync from with each entry containing two properties, **url** and **options** (see: https://chrony.tuxfamily.org/doc/4.2/chrony.conf.html#pool)
+  - **makestep**: An object containing remedial instructions if the clock of the vm is significantly out of sync at startup. It is an object containing two properties, **threshold** and **limit** (see: https://chrony.tuxfamily.org/doc/4.2/chrony.conf.html#makestep)
+- **fluentd**: Optional fluend configuration to securely route logs to a fluend node using the forward plugin. It has the following keys:
+  - **enabled**: If set the false (the default), fluentd will not be installed.
+  - **coredns_tag**: Tag to assign to logs coming from coredns
+  - **coredns_updater_tag**: Tag to assign to logs coming from the coredns zonefiles updater
+  - **node_exporter_tag** Tag to assign to logs coming from the prometheus node exporter
+  - **forward**: Configuration for the forward plugin that will talk to the external fluend node. It has the following keys:
+    - **domain**: Ip or domain name of the remote fluend node.
+    - **port**: Port the remote fluend node listens on
+    - **hostname**: Unique hostname identifier for the vm
+    - **shared_key**: Secret shared key with the remote fluentd node to authentify the client
+    - **ca_cert**: CA certificate that signed the remote fluentd node's server certificate (used to authentify it)
+  - **buffer**: Configuration for the buffering of outgoing fluentd traffic
+    - **customized**: Set to false to use the default buffering configurations. If you wish to customize it, set this to true.
+    - **custom_value**: Custom buffering configuration to provide that will override the default one. Should be valid fluentd configuration syntax, including the opening and closing ```<buffer>``` tags.
 
 ## Example
 
@@ -97,12 +122,20 @@ module "coredns" {
   cloud_init_volume_pool = "coredns"
   ssh_admin_public_key = local.coredns_ssh_public_key
   admin_user_password = local.console_password
-  etcd_ca_certificate = local.etcd_ca_cert
-  etcd_client_certificate = local.etcd_coredns_cert
-  etcd_client_key = local.etcd_coredns_key
-  etcd_key_prefix = "/coredns/"
-  etcd_endpoints = [for server in local.etcd.servers: "${server.ip}:2379"]
-  alternate_dns_servers = ["8.8.8.8"]
+  etcd = {
+      ca_certificate = local.etcd_ca_cert
+      etcd_key_prefix = "/coredns/"
+      etcd_endpoints = [for server in local.etcd.servers: "${server.ip}:2379"]
+      client = {
+          key = local.etcd_coredns_key
+          certificate = local.etcd_coredns_cert
+      }
+  }
+  dns = {
+      alternate_dns_servers = ["8.8.8.8"]
+      zonefiles_reload_interval = "3s"
+      load_balance_records = true
+  }
 }
 ```
 
